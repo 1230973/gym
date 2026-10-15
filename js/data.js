@@ -32,7 +32,7 @@ export const EXERCISE_RANGE = {
   "Abs": { range: "10-15", min: 10, max: 15, cat: "Abs" }
 };
 
-export const PLAN = {
+export const DEFAULT_PLAN = {
   "1": {
     focus: "Back + Traps + Rear Delt",
     color: "var(--d1)",
@@ -81,13 +81,13 @@ export const SEED = {
   }
 };
 
-export const CARDIO_SLOTS = [
-  { id: "cardio-pa", name: "Após o pequeno-almoço", note: "15 min · obrigatória" },
-  { id: "cardio-al", name: "Após o almoço", note: "15 min · obrigatória" },
-  { id: "cardio-ja", name: "Após o jantar", note: "15 min · opcional, só se o horário der" }
+export const DEFAULT_CARDIO_SLOTS = [
+  { id: "cardio-pa", name: "Após o pequeno-almoço", note: "15 min · obrigatória", defMin: 15 },
+  { id: "cardio-al", name: "Após o almoço", note: "15 min · obrigatória", defMin: 15 },
+  { id: "cardio-ja", name: "Após o jantar", note: "15 min · opcional, só se o horário der", defMin: 15 }
 ];
 
-export const SUPP_ITEMS = [
+export const DEFAULT_SUPP_ITEMS = [
   { id: "citrulina", name: "Citrulina malato", note: "pré-treino · 30-45min antes", workoutOnly: true },
   { id: "glicerol", name: "Glicerol", note: "pré-treino · pump", workoutOnly: true },
   { id: "beterraba", name: "Beterraba em pó", note: "pré-treino · pump", workoutOnly: true },
@@ -97,9 +97,6 @@ export const SUPP_ITEMS = [
   { id: "omega3", name: "Ómega-3", note: "diário", workoutOnly: false },
   { id: "magnesio", name: "Magnésio glicinato", note: "diário · à noite", workoutOnly: false }
 ];
-
-export const WATER_MIN = 3500;
-export const WATER_MAX = 4500;
 
 export const FOOD_BANKS = {
   rapid: ["Arroz branco", "Batata cozida/assada", "Pão branco", "Maltodextrina/dextrose", "Cornflakes sem açúcar", "Banana madura", "Melancia"],
@@ -129,51 +126,51 @@ const SLOT_INTRA = {
   sugg: "30g maltodextrina + eletrólitos em 600-700ml de água, aos goles."
 };
 
-function slot(time, name, base) {
-  return { time, name, zone: base.zone, rule: base.rule, sugg: base.sugg };
+function slot(time, name, base, hcTarget = null) {
+  return { time, name, zone: base.zone, rule: base.rule, sugg: base.sugg, hcTarget };
 }
 
-export const NT_TIERS = {
+export const DEFAULT_NT_TIERS = {
   "high-am": {
     label: "High · Treino de Manhã (10h)", short: "High 10h", color: "var(--high)",
     macros: { hc: "470g", prot: "140g", gord: "55g", kcal: "~2.950" },
     slots: [
-      slot("08:00", "Pré-treino", SLOT_PERI),
-      slot("10:00", "Intra-treino", SLOT_INTRA),
-      slot("12:00", "Pós-treino (+ fruta)", SLOT_PERI),
-      slot("16:30", "Longe do treino", SLOT_AWAY),
-      slot("20:30", "Jantar (sem fruta)", SLOT_AWAY)
+      slot("08:00", "Pré-treino", SLOT_PERI, "~110g HC"),
+      slot("10:00", "Intra-treino", SLOT_INTRA, "~30g HC"),
+      slot("12:00", "Pós-treino (+ fruta)", SLOT_PERI, "~190g HC"),
+      slot("16:30", "Longe do treino", SLOT_AWAY, "~70g HC"),
+      slot("20:30", "Jantar (sem fruta)", SLOT_AWAY, "~70g HC")
     ]
   },
   "high-pm": {
     label: "High · Treino à Noite (22h)", short: "High 22h", color: "var(--high)",
     macros: { hc: "470g", prot: "140g", gord: "55g", kcal: "~2.950" },
     slots: [
-      slot("08:30", "Longe do treino", SLOT_AWAY),
-      slot("13:00", "Longe do treino", SLOT_AWAY),
-      slot("19:30", "Pré-treino", SLOT_PERI),
-      slot("22:00", "Intra-treino", SLOT_INTRA),
-      slot("23:30", "Pós-treino (+ fruta)", SLOT_PERI)
+      slot("08:30", "Longe do treino", SLOT_AWAY, "~70g HC"),
+      slot("13:00", "Longe do treino", SLOT_AWAY, "~70g HC"),
+      slot("19:30", "Pré-treino", SLOT_PERI, "~110g HC"),
+      slot("22:00", "Intra-treino", SLOT_INTRA, "~30g HC"),
+      slot("23:30", "Pós-treino (+ fruta)", SLOT_PERI, "~190g HC")
     ]
   },
   "med": {
     label: "Med · Descanso ou Ponte 36h", short: "Med", color: "var(--med)",
     macros: { hc: "330g", prot: "140g", gord: "65g", kcal: "~2.500" },
     slots: [
-      slot("", "Pequeno-almoço", SLOT_AWAY),
-      slot("", "Almoço", SLOT_AWAY),
-      slot("", "Lanche", SLOT_AWAY),
-      slot("", "Jantar (sem fruta)", SLOT_AWAY)
+      slot("", "Pequeno-almoço", SLOT_AWAY, "~80g HC"),
+      slot("", "Almoço", SLOT_AWAY, "~100g HC"),
+      slot("", "Lanche", SLOT_AWAY, "~50g HC"),
+      slot("", "Jantar (sem fruta)", SLOT_AWAY, "~100g HC")
     ]
   },
   "low": {
     label: "Low · Descanso Prolongado", short: "Low", color: "var(--low)",
     macros: { hc: "115g", prot: "140g", gord: "92g", kcal: "1.850-1.950" },
     slots: [
-      slot("", "Pequeno-almoço", SLOT_AWAY),
-      slot("", "Almoço", SLOT_AWAY),
-      slot("", "Lanche", SLOT_AWAY),
-      slot("", "Jantar (sem fruta)", SLOT_AWAY)
+      slot("", "Pequeno-almoço", SLOT_AWAY, "~25g HC"),
+      slot("", "Almoço", SLOT_AWAY, "~35g HC"),
+      slot("", "Lanche", SLOT_AWAY, "~20g HC"),
+      slot("", "Jantar (sem fruta)", SLOT_AWAY, "~35g HC")
     ]
   }
 };
@@ -188,7 +185,7 @@ export const NT_SCENARIO_TIER = {
 };
 
 export const DEFAULT_HABITS = [
-  { id: "h-whoop", name: "Rever recuperação e sono WHOOP", cat: "Biometria" },
-  { id: "h-uni", name: "Bloco de estudo / Engenharia Informática", cat: "Faculdade" },
-  { id: "h-tryit", name: "Bloco de trabalho / TryIt", cat: "Trabalho" }
+  { id: "h-whoop", name: "Rever recuperação e sono WHOOP", cat: "Biometria", days: [1,2,3,4,5,6,0] },
+  { id: "h-uni", name: "Bloco de estudo / Engenharia Informática", cat: "Faculdade", days: [1,2,3,4,5] },
+  { id: "h-tryit", name: "Bloco de trabalho / TryIt", cat: "Trabalho", days: [1,2,3,4,5] }
 ];

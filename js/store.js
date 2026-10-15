@@ -1,4 +1,4 @@
-import { SEED, SUPP_ITEMS, DEFAULT_HABITS } from "./data.js";
+import { SEED, DEFAULT_PLAN, DEFAULT_CARDIO_SLOTS, DEFAULT_SUPP_ITEMS, DEFAULT_NT_TIERS, DEFAULT_HABITS } from "./data.js";
 
 const LS_KEY = "tt3";
 const LS_CLOUD_KEY = "tt3_cloud_cfg";
@@ -18,6 +18,7 @@ export function freshToday() {
     sleepOk: null,
     supp: {},
     water: 0,
+    protein: 0,
     habitsDone: {},
     weight: null
   };
@@ -75,7 +76,7 @@ function seedLog() {
 
 export const store = {
   ts: 0,
-  state: { day: "1", page: "page-treino" },
+  state: { day: "1", page: "page-hoje" },
   log: seedLog(),
   hist: [],
   dayUI: freshToday(),
@@ -85,10 +86,20 @@ export const store = {
   tasks: [],
   dailyLogs: {},
   bodyWeight: {},
-  editSession: null // { targetTs: number, draft: { day, date, log } }
+  editSession: null,
+  settings: {
+    plan: JSON.parse(JSON.stringify(DEFAULT_PLAN)),
+    cardioSlots: JSON.parse(JSON.stringify(DEFAULT_CARDIO_SLOTS)),
+    suppItems: JSON.parse(JSON.stringify(DEFAULT_SUPP_ITEMS)),
+    ntTiers: JSON.parse(JSON.stringify(DEFAULT_NT_TIERS)),
+    waterMin: 3500,
+    waterMax: 4500,
+    proteinTarget: 140,
+    sleepMin: 6,
+    recoveryHours: 36
+  }
 };
 
-/* CONFIGURAÇÃO CLOUD ISOLADA DO BLOB E DOS BACKUPS */
 export const cloudConfig = { url: "", key: "", syncId: "" };
 
 export function loadCloudConfig() {
@@ -122,9 +133,10 @@ export function onStoreChange(fn) {
 }
 
 export function computeExpectedSuppCount(scenario, suppFilter) {
+  const items = store.settings.suppItems || DEFAULT_SUPP_ITEMS;
   const isWorkout = !scenario || scenario === "high-am" || scenario === "high-pm";
   const showAll = suppFilter === "all" || isWorkout;
-  return showAll ? SUPP_ITEMS.length : SUPP_ITEMS.filter(i => !i.workoutOnly).length;
+  return showAll ? items.length : items.filter(i => !i.workoutOnly).length;
 }
 
 function snapshotDayUI(ui) {
@@ -133,11 +145,15 @@ function snapshotDayUI(ui) {
   const suppDone = Object.values(ui.supp || {}).filter(Boolean).length;
   const suppTarget = computeExpectedSuppCount(store.ntState?.scenario, store.ntState?.suppFilter);
   const habitsDone = Object.values(ui.habitsDone || {}).filter(Boolean).length;
-  const habitsTarget = (store.habits || []).length;
+  const dayOfWeek = new Date(ui.stamp).getDay();
+  const activeHabits = (store.habits || []).filter(h => !h.days || h.days.includes(dayOfWeek));
+  const habitsTarget = activeHabits.length || 1;
   const water = ui.water || 0;
+  const protein = ui.protein || 0;
 
   store.dailyLogs[ui.stamp] = {
     water,
+    protein,
     cardioDone,
     suppDone,
     suppTarget,
@@ -158,7 +174,6 @@ export function checkRolloverOnWake() {
     snapshotDayUI(store.dayUI);
     store.dayUI = freshToday();
     store.ntDone = freshNtDone();
-    // Rollover automático não altera store.ts para não sobrescrever a cloud sem ação humana
     persist(false);
     return true;
   }
@@ -171,9 +186,10 @@ export function computeSuggestedScenario() {
     return hour < 14 ? "high-am" : "high-pm";
   }
   const last = store.hist[store.hist.length - 1];
+  const recHours = store.settings.recoveryHours || 36;
   const hoursSince = (Date.now() - (last.ts || 0)) / (3600 * 1000);
-  if (hoursSince < 20) return "rest-after-double";
-  if (hoursSince >= 20 && hoursSince < 34) {
+  if (hoursSince < recHours - 16) return "rest-after-double";
+  if (hoursSince >= recHours - 16 && hoursSince < recHours) {
     return hour < 15 ? "rest-next-am" : "high-pm";
   }
   return hour < 14 ? "high-am" : "high-pm";
@@ -191,7 +207,7 @@ export function validateAndApplyBlob(b) {
   store.ts = typeof b.ts === "number" ? b.ts : 0;
   store.state = {
     day: ["1", "2", "3"].includes(String(b.state.day)) ? String(b.state.day) : "1",
-    page: typeof b.state.page === "string" ? b.state.page : "page-treino"
+    page: typeof b.state.page === "string" ? b.state.page : "page-hoje"
   };
 
   store.log = { "1": {}, "2": {}, "3": {} };
@@ -222,6 +238,20 @@ export function validateAndApplyBlob(b) {
   store.tasks = Array.isArray(b.tasks) ? b.tasks : [];
   store.editSession = (b.editSession && typeof b.editSession === "object") ? b.editSession : null;
 
+  if (b.settings && typeof b.settings === "object") {
+    store.settings = {
+      plan: b.settings.plan || JSON.parse(JSON.stringify(DEFAULT_PLAN)),
+      cardioSlots: b.settings.cardioSlots || JSON.parse(JSON.stringify(DEFAULT_CARDIO_SLOTS)),
+      suppItems: b.settings.suppItems || JSON.parse(JSON.stringify(DEFAULT_SUPP_ITEMS)),
+      ntTiers: b.settings.ntTiers || JSON.parse(JSON.stringify(DEFAULT_NT_TIERS)),
+      waterMin: Number(b.settings.waterMin) || 3500,
+      waterMax: Number(b.settings.waterMax) || 4500,
+      proteinTarget: Number(b.settings.proteinTarget) || 140,
+      sleepMin: Number(b.settings.sleepMin) || 6,
+      recoveryHours: Number(b.settings.recoveryHours) || 36
+    };
+  }
+
   store.ntState = {
     scenario: b.ntState?.scenario || "",
     mode: b.ntState?.mode || "low",
@@ -245,38 +275,25 @@ export function validateAndApplyBlob(b) {
   store.ntDone = incomingNtDone.date === isoToday() ? incomingNtDone : freshNtDone();
 }
 
-/* FUSÃO INTELIGENTE (SMART MERGE) ENTRE LOCAL E CLOUD */
 function mergeRemoteAndLocal(remoteBlob, localBlob) {
   const remoteWinsTop = (Number(remoteBlob.ts) || 0) >= (Number(localBlob.ts) || 0);
   const base = JSON.parse(JSON.stringify(remoteWinsTop ? remoteBlob : localBlob));
 
-  // 1. Fundir histórico de sessões por ts único (ordenado cronologicamente)
   const histMap = new Map();
   (localBlob.hist || []).forEach(h => { if (h && h.ts) histMap.set(Number(h.ts), h); });
   (remoteBlob.hist || []).forEach(h => { if (h && h.ts) histMap.set(Number(h.ts), h); });
   base.hist = Array.from(histMap.values()).sort((a, b) => a.ts - b.ts).slice(-150);
 
-  // 2. Fundir dailyLogs por data (mantendo o mais completo)
   base.dailyLogs = { ...(localBlob.dailyLogs || {}), ...(remoteBlob.dailyLogs || {}) };
-  if (!remoteWinsTop) {
-    base.dailyLogs = { ...(remoteBlob.dailyLogs || {}), ...(localBlob.dailyLogs || {}) };
-  }
-
-  // 3. Fundir bodyWeight por data
   base.bodyWeight = { ...(localBlob.bodyWeight || {}), ...(remoteBlob.bodyWeight || {}) };
-  if (!remoteWinsTop) {
-    base.bodyWeight = { ...(remoteBlob.bodyWeight || {}), ...(localBlob.bodyWeight || {}) };
-  }
-
   base.ts = Math.max(Number(remoteBlob.ts) || 0, Number(localBlob.ts) || 0);
   return base;
 }
 
-/* buildBlob NUNCA altera store.ts sozinho */
 export function buildBlob() {
   snapshotDayUI(store.dayUI);
   return {
-    v: 6,
+    v: 7,
     ts: store.ts,
     state: store.state,
     log: store.log,
@@ -288,11 +305,11 @@ export function buildBlob() {
     tasks: store.tasks,
     dailyLogs: store.dailyLogs,
     bodyWeight: store.bodyWeight,
-    editSession: store.editSession
+    editSession: store.editSession,
+    settings: store.settings
   };
 }
 
-/* LIGAÇÃO SINGLETON AO INDEXEDDB */
 let dbPromise = null;
 function getDB() {
   if (!dbPromise) {
@@ -336,7 +353,6 @@ function setSyncDot(saving) {
   if (dot) dot.classList.toggle("saving", saving);
 }
 
-/* touchTs = true APENAS quando chamado por ação real do utilizador */
 export function persist(touchTs = true) {
   clearTimeout(debounceTimer);
   hasPendingWrite = false;
@@ -354,7 +370,6 @@ export function persist(touchTs = true) {
       clearTimeout(cloudTimer);
       cloudTimer = setTimeout(() => cloudPush(blob), 1500);
     } else {
-      // Se ainda não reconciliou (ex: estava offline no arranque), tenta reconciliar primeiro
       scheduleReconcileRetry(5000);
     }
   }
@@ -391,7 +406,7 @@ export function loadStore() {
         if (getReq.result) {
           try { validateAndApplyBlob(getReq.result); } catch (e) {}
         }
-        persist(false); // Não toca em store.ts no carregamento inicial!
+        persist(false);
         resolve();
       };
       getReq.onerror = () => { persist(false); resolve(); };
@@ -402,7 +417,6 @@ export function loadStore() {
   });
 }
 
-/* SUPABASE CLOUD SYNC SEGURO (NUNCA DESBLOQUEIA SE O GET FALHAR) */
 export async function cloudPush(blob = buildBlob()) {
   const { url, key, syncId } = cloudConfig;
   if (!url || !key) return false;
@@ -469,7 +483,6 @@ export async function cloudSyncReconcile(onPulledCallback) {
       headers: { "apikey": key, "Authorization": `Bearer ${key}` }
     });
     if (!res.ok) {
-      // FALHOU (401/500): Mantém cloudAutoSyncReady = false para NUNCA sobrescrever a cloud
       cloudAutoSyncReady = false;
       scheduleReconcileRetry(30000);
       return { action: "error" };
@@ -494,7 +507,6 @@ export async function cloudSyncReconcile(onPulledCallback) {
       }
       return { action: "equal" };
     } else {
-      // Tabela vazia para este syncId: seguro desbloquear e enviar estado inicial se existir
       cloudAutoSyncReady = true;
       if (store.ts > 0) {
         await cloudPush(buildBlob());
@@ -503,7 +515,6 @@ export async function cloudSyncReconcile(onPulledCallback) {
       return { action: "empty" };
     }
   } catch (e) {
-    // OFFLINE: Mantém cloudAutoSyncReady = false e tenta mais tarde
     cloudAutoSyncReady = false;
     scheduleReconcileRetry(30000);
     return { action: "offline" };

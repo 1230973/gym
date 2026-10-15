@@ -1,4 +1,4 @@
-const CACHE_NAME = "life-os-v5";
+const CACHE_NAME = "life-os-v7";
 const ASSETS = [
   "./",
   "./index.html",
@@ -12,9 +12,10 @@ const ASSETS = [
   "./js/data.js",
   "./js/store.js",
   "./js/ui.js",
+  "./js/modules/hoje.js",
   "./js/modules/treino.js",
   "./js/modules/nutricao.js",
-  "./js/modules/metas.js"
+  "./js/modules/def.js"
 ];
 
 self.addEventListener("install", e => {

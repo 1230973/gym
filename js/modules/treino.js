@@ -310,7 +310,7 @@ function computeProgressionHint(lastEntry, rangeObj) {
   if (lastEntry.reps >= rangeObj.min) {
     return { cls: "prog-badge prog-keep", text: `= Manter (${rangeObj.max} alvo)` };
   }
-  return { cls: "prog-badge prog-down", text: "↓ Consolidar carga" };
+  return { cls: "prog-badge prog-down", text: "↓ Baixar carga ou repetir" };
 }
 
 function updateExerciseProgress() {

@@ -1,35 +1,35 @@
 export const EXERCISE_RANGE = {
-  "Neutral Press": { range: "6-8", cat: "Composto", guess: true },
-  "Recline Curl": { range: "8-12", cat: "Isolamento", guess: true },
-  "Lateral Raise Machine": { range: "8-12", cat: "Isolamento" },
-  "Tricep Extension": { range: "8-12", cat: "Isolamento" },
-  "Rear Delt Fly": { range: "8-12", cat: "Isolamento" },
-  "Kelso Shrug": { range: "8-12", cat: "Isolamento" },
-  "Close Grip Row": { range: "6-8", cat: "Composto" },
-  "Frontal Pull": { range: "6-8", cat: "Composto" },
-  "Seated Leg Curl": { range: "8-12", cat: "Isolamento" },
-  "Alternating Leg Extension": { range: "8-12", cat: "Isolamento" },
-  "Transverse Row": { range: "6-8", cat: "Composto", guess: true },
-  "Sagittal Single Arm Pull": { range: "6-8", cat: "Composto", guess: true },
-  "Bayesian Curl": { range: "8-12", cat: "Isolamento" },
-  "Tricep Overhead Extension": { range: "8-12", cat: "Isolamento" },
-  "Lower Pec Fly": { range: "8-12", cat: "Isolamento" },
-  "Y Raise Cable": { range: "8-12", cat: "Isolamento" },
-  "Single Arm Fly": { range: "8-12", cat: "Isolamento" },
-  "Full ROM Shoulder Press": { range: "6-8", cat: "Composto" },
-  "Single Leg 45°": { range: "6-8", cat: "Composto", guess: true },
-  "Leg Extension Extended Hip": { range: "8-12", cat: "Isolamento", guess: true },
-  "Pec Fly": { range: "8-12", cat: "Isolamento" },
-  "45° Row": { range: "6-8", cat: "Composto" },
-  "Front Raise": { range: "8-12", cat: "Isolamento" },
-  "Pullover Uni": { range: "8-12", cat: "Isolamento" },
-  "Preacher": { range: "8-12", cat: "Isolamento" },
-  "JM Press": { range: "6-8", cat: "Composto" },
-  "Reverse": { range: "8-12", cat: "Isolamento", guess: true },
-  "Adductors": { range: "8-12", cat: "Isolamento" },
-  "Single Leg SLDL": { range: "6-8", cat: "Composto" },
-  "Calves": { range: "10-15", cat: "Gémeos" },
-  "Abs": { range: "10-15", cat: "Abs" }
+  "Neutral Press": { range: "6-8", min: 6, max: 8, cat: "Composto", guess: true },
+  "Recline Curl": { range: "8-12", min: 8, max: 12, cat: "Isolamento", guess: true },
+  "Lateral Raise Machine": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Tricep Extension": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Rear Delt Fly": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Kelso Shrug": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Close Grip Row": { range: "6-8", min: 6, max: 8, cat: "Composto" },
+  "Frontal Pull": { range: "6-8", min: 6, max: 8, cat: "Composto" },
+  "Seated Leg Curl": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Alternating Leg Extension": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Transverse Row": { range: "6-8", min: 6, max: 8, cat: "Composto", guess: true },
+  "Sagittal Single Arm Pull": { range: "6-8", min: 6, max: 8, cat: "Composto", guess: true },
+  "Bayesian Curl": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Tricep Overhead Extension": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Lower Pec Fly": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Y Raise Cable": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Single Arm Fly": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Full ROM Shoulder Press": { range: "6-8", min: 6, max: 8, cat: "Composto" },
+  "Single Leg 45°": { range: "6-8", min: 6, max: 8, cat: "Composto", guess: true },
+  "Leg Extension Extended Hip": { range: "8-12", min: 8, max: 12, cat: "Isolamento", guess: true },
+  "Pec Fly": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "45° Row": { range: "6-8", min: 6, max: 8, cat: "Composto" },
+  "Front Raise": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Pullover Uni": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Preacher": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "JM Press": { range: "6-8", min: 6, max: 8, cat: "Composto" },
+  "Reverse": { range: "8-12", min: 8, max: 12, cat: "Isolamento", guess: true },
+  "Adductors": { range: "8-12", min: 8, max: 12, cat: "Isolamento" },
+  "Single Leg SLDL": { range: "6-8", min: 6, max: 8, cat: "Composto" },
+  "Calves": { range: "10-15", min: 10, max: 15, cat: "Gémeos" },
+  "Abs": { range: "10-15", min: 10, max: 15, cat: "Abs" }
 };
 
 export const PLAN = {
@@ -64,20 +64,20 @@ export const PLAN = {
 
 export const SEED = {
   "1": {
-    "Kelso Shrug": { kg: "70kg", reps: "overshot" },
-    "Rear Delt Fly": { kg: "18kg", reps: "8" },
-    "Frontal Pull": { kg: "86kg", reps: "" },
-    "Close Grip Row": { kg: "84kg", reps: "10" },
-    "Lateral Raise Machine": { kg: "86kg", reps: "" },
-    "Recline Curl": { kg: "17.5kg", reps: "6" },
-    "Alternating Leg Extension": { kg: "43kg", reps: "9" },
-    "Seated Leg Curl": { kg: "n fiz", reps: "" },
-    "Calves": { kg: "20kg", reps: "12" },
-    "Abs": { kg: "76kg", reps: "" },
-    "Tricep Extension": { kg: "25kg", reps: "10" }
+    "Kelso Shrug": { kg: 70, reps: null, note: "overshot" },
+    "Rear Delt Fly": { kg: 18, reps: 8, note: "" },
+    "Frontal Pull": { kg: 86, reps: null, note: "" },
+    "Close Grip Row": { kg: 84, reps: 10, note: "" },
+    "Lateral Raise Machine": { kg: 86, reps: null, note: "" },
+    "Recline Curl": { kg: 17.5, reps: 6, note: "" },
+    "Alternating Leg Extension": { kg: 43, reps: 9, note: "" },
+    "Seated Leg Curl": { kg: null, reps: null, note: "n fiz" },
+    "Calves": { kg: 20, reps: 12, note: "" },
+    "Abs": { kg: 76, reps: null, note: "" },
+    "Tricep Extension": { kg: 25, reps: 10, note: "" }
   },
   "3": {
-    "Pec Fly": { kg: "FullStack", reps: "" }
+    "Pec Fly": { kg: null, reps: null, note: "FullStack" }
   }
 };
 
@@ -88,14 +88,14 @@ export const CARDIO_SLOTS = [
 ];
 
 export const SUPP_ITEMS = [
-  { id: "citrulina", name: "Citrulina malato", note: "pré-treino · 30-45min antes" },
-  { id: "glicerol", name: "Glicerol", note: "pré-treino · pump" },
-  { id: "beterraba", name: "Beterraba em pó", note: "pré-treino · pump" },
-  { id: "eletrolitos", name: "Eletrólitos/sódio", note: "intra-treino · na água do malto" },
-  { id: "creatina", name: "Creatina 5g", note: "diário · pós-treino ou com refeição HC" },
-  { id: "d3k2", name: "Vitamina D3+K2", note: "diário · com gordura" },
-  { id: "omega3", name: "Ómega-3", note: "diário" },
-  { id: "magnesio", name: "Magnésio glicinato", note: "diário · à noite" }
+  { id: "citrulina", name: "Citrulina malato", note: "pré-treino · 30-45min antes", workoutOnly: true },
+  { id: "glicerol", name: "Glicerol", note: "pré-treino · pump", workoutOnly: true },
+  { id: "beterraba", name: "Beterraba em pó", note: "pré-treino · pump", workoutOnly: true },
+  { id: "eletrolitos", name: "Eletrólitos/sódio", note: "intra-treino · na água do malto", workoutOnly: true },
+  { id: "creatina", name: "Creatina 5g", note: "diário · pós-treino ou com refeição HC", workoutOnly: false },
+  { id: "d3k2", name: "Vitamina D3+K2", note: "diário · com gordura", workoutOnly: false },
+  { id: "omega3", name: "Ómega-3", note: "diário", workoutOnly: false },
+  { id: "magnesio", name: "Magnésio glicinato", note: "diário · à noite", workoutOnly: false }
 ];
 
 export const WATER_MIN = 3500;

@@ -1,6 +1,6 @@
 import { SUPP_ITEMS, WATER_MIN, WATER_MAX, FOOD_BANKS, NT_TIERS, NT_TIER_ORDER, NT_SCENARIO_TIER } from "../data.js";
 import { store, persist, isoToday } from "../store.js";
-import { $, el } from "../ui.js";
+import { $, el, toast } from "../ui.js";
 
 let ntActiveTier = "";
 
@@ -25,12 +25,20 @@ export function initNutricaoModule() {
     </section>
 
     <section class="section">
-      <div class="section-head"><h2 class="section-title">Suplementos</h2><span class="section-meta" id="supp-progress"></span></div>
+      <div class="section-head">
+        <h2 class="section-title">Suplementos</h2>
+        <button class="btn btn-sm btn-ghost" id="supp-filter-btn" type="button" style="margin-left:auto; margin-right:6px;"></button>
+        <span class="section-meta" id="supp-progress" style="margin-left:0;"></span>
+      </div>
       <div class="card" id="supp-card"></div>
     </section>
 
     <section class="section">
-      <div class="section-head"><h2 class="section-title">Nutrição</h2><span class="section-meta" id="nt-progress"></span></div>
+      <div class="section-head">
+        <h2 class="section-title">Nutrição</h2>
+        <button class="btn btn-sm btn-ghost" id="nt-auto-suggest" type="button" style="margin-left:auto; margin-right:6px;">Sugerir Auto</button>
+        <span class="section-meta" id="nt-progress" style="margin-left:0;"></span>
+      </div>
       <div class="nt-chips" id="nt-chips">
         <button class="nt-chip" type="button" data-scenario="high-am">Treino Manhã (10h)</button>
         <button class="nt-chip" type="button" data-scenario="high-pm">Treino Noite (22h)</button>
@@ -80,10 +88,19 @@ export function initNutricaoModule() {
   });
 
   $("water-reset").addEventListener("click", () => {
+    if (!store.dayUI.water || !window.confirm("Zerar o contador de água de hoje?")) return;
     store.dayUI.water = 0;
     renderWater();
     persist();
   });
+
+  $("supp-filter-btn").addEventListener("click", () => {
+    store.ntState.suppFilter = store.ntState.suppFilter === "all" ? "auto" : "all";
+    persist();
+    renderSupp();
+  });
+
+  $("nt-auto-suggest").addEventListener("click", autoSuggestScenario);
 
   $("nt-chips").querySelectorAll(".nt-chip").forEach(chip => {
     chip.addEventListener("click", () => ntSelect(chip.dataset.scenario, false));
@@ -107,6 +124,35 @@ export function initNutricaoModule() {
   renderNutricaoModule();
 }
 
+function isWorkoutDay() {
+  const sc = store.ntState.scenario;
+  if (sc === "high-am" || sc === "high-pm") return true;
+  if (sc && sc.startsWith("rest-")) return false;
+  return true;
+}
+
+function autoSuggestScenario() {
+  const hour = new Date().getHours();
+  if (!store.hist.length) {
+    const sc = hour < 14 ? "high-am" : "high-pm";
+    ntSelect(sc, false);
+    toast(`Sugerido: ${sc === "high-am" ? "Treino Manhã" : "Treino Noite"}`);
+    return;
+  }
+  const last = store.hist[store.hist.length - 1];
+  const hoursSince = (Date.now() - (last.ts || 0)) / (3600 * 1000);
+  let suggested = "high-am";
+  if (hoursSince < 20) {
+    suggested = "rest-after-double";
+  } else if (hoursSince >= 20 && hoursSince < 34) {
+    suggested = hour < 15 ? "rest-next-am" : "high-pm";
+  } else {
+    suggested = hour < 14 ? "high-am" : "high-pm";
+  }
+  ntSelect(suggested, false);
+  toast("Cenário sugerido com base na última sessão");
+}
+
 export function renderNutricaoModule() {
   renderWater();
   renderSupp();
@@ -125,12 +171,19 @@ function renderWater() {
 function renderSupp() {
   const host = $("supp-card");
   host.innerHTML = "";
+  const showAll = store.ntState.suppFilter === "all" || isWorkoutDay();
+  const visibleItems = showAll ? SUPP_ITEMS : SUPP_ITEMS.filter(i => !i.workoutOnly);
+
+  $("supp-filter-btn").textContent = showAll
+    ? (isWorkoutDay() ? "Dia Treino" : "A mostrar todos")
+    : "Dia Descanso (só diários)";
+
   const updateCount = () => {
-    const done = SUPP_ITEMS.filter(i => store.dayUI.supp?.[i.id]).length;
-    $("supp-progress").textContent = `${done}/${SUPP_ITEMS.length}`;
+    const done = visibleItems.filter(i => store.dayUI.supp?.[i.id]).length;
+    $("supp-progress").textContent = `${done}/${visibleItems.length}`;
   };
 
-  SUPP_ITEMS.forEach(item => {
+  visibleItems.forEach(item => {
     const isDone = !!(store.dayUI.supp && store.dayUI.supp[item.id]);
     const row = el("div", `list-row${isDone ? " done" : ""}`);
     const name = el("div", "list-name", item.name);
@@ -139,6 +192,7 @@ function renderSupp() {
 
     const check = el("button", `check${isDone ? " checked" : ""}`);
     check.type = "button";
+    check.setAttribute("aria-label", `Marcar suplemento ${item.name}`);
     check.addEventListener("click", () => {
       store.dayUI.supp = store.dayUI.supp || {};
       store.dayUI.supp[item.id] = !store.dayUI.supp[item.id];
@@ -172,6 +226,7 @@ function ntSelect(scenario, keepMode) {
   });
 
   ntActiveTier = ntResolve(scenario, store.ntState.mode);
+  renderSupp();
   if (!ntActiveTier) return;
 
   const tier = NT_TIERS[ntActiveTier];
@@ -209,6 +264,7 @@ function renderMeals(tier) {
 
     const check = el("button", `nt-check${isChecked ? " nt-checked" : ""}`);
     check.type = "button";
+    check.setAttribute("aria-label", `Marcar refeição ${s.name}`);
     check.addEventListener("click", () => {
       store.ntDone.checked[idx] = !store.ntDone.checked[idx];
       card.classList.toggle("nt-done", !!store.ntDone.checked[idx]);

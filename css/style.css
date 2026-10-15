@@ -14,6 +14,7 @@
   --low: #8b7cf6;
   --danger: #e0555f;
   --warn: #f59e0b;
+  --gold: #fbbf24;
   --day-color: var(--d1);
   --tier-color: var(--muted);
   --mono: ui-monospace, "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
@@ -170,7 +171,7 @@ body {
 .section-meta { margin-left: auto; font-size: .74rem; color: var(--muted); font-family: var(--mono); }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
 
-/* BANNER DE RECUPERAÇÃO 36H */
+/* BANNERS */
 .rec-banner {
   display: flex;
   align-items: center;
@@ -187,6 +188,20 @@ body {
 .rec-banner b { color: var(--text); font-family: var(--mono); }
 .rec-banner.wait { border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.07); }
 .rec-banner.ready { border-color: rgba(45, 212, 191, 0.4); background: rgba(45, 212, 191, 0.07); }
+.edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid var(--warn);
+  color: var(--gold);
+  border-radius: 10px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+  font-size: .78rem;
+  font-weight: 500;
+}
 
 /* TREINO */
 .day-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
@@ -217,7 +232,7 @@ body {
 .btn-ghost { background: transparent; color: var(--muted); border-style: dashed; }
 .btn-sm { padding: 6px 10px; font-size: .72rem; border-radius: 8px; flex: 0 0 auto; }
 
-/* CARTÃO DE EXERCÍCIO + PROGRESSÃO + SPARKLINE */
+/* EXERCÍCIOS + PROGRESSÃO + PR + SPARKLINE */
 .ex { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; margin-bottom: 8px; transition: opacity .15s ease; }
 .ex.done { opacity: .48; }
 .ex-top { display: flex; align-items: center; gap: 10px; }
@@ -237,8 +252,9 @@ body {
 .prog-up { background: rgba(45, 212, 191, 0.15); color: var(--med); border: 1px solid rgba(45, 212, 191, 0.35); }
 .prog-keep { background: rgba(255, 255, 255, 0.06); color: var(--muted); border: 1px solid var(--border); }
 .prog-down { background: rgba(245, 158, 11, 0.14); color: var(--warn); border: 1px solid rgba(245, 158, 11, 0.35); }
+.pr-badge { font-family: var(--mono); font-size: .66rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: rgba(251, 191, 36, 0.18); color: var(--gold); border: 1px solid rgba(251, 191, 36, 0.45); }
 
-.sparkline-wrap { margin-left: auto; display: flex; align-items: center; gap: 4px; title: "Evolução de carga"; }
+.sparkline-wrap { margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .sparkline-svg { width: 54px; height: 18px; overflow: visible; }
 
 .ex-load { display: flex; align-items: center; gap: 6px; margin-top: 9px; padding-left: 28px; flex-wrap: wrap; }
@@ -282,7 +298,7 @@ body {
 .del-btn { background: transparent; border: none; color: var(--muted); font-size: .95rem; cursor: pointer; padding: 6px 8px; border-radius: 6px; }
 .del-btn:active { background: var(--surface-2); color: var(--danger); }
 
-/* ÁGUA */
+/* ÁGUA & PESO CORPORAL */
 .water-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .water-amount { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .water-target { font-size: .76rem; color: var(--muted); }
@@ -290,6 +306,8 @@ body {
 .water-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--d2), var(--med)); transition: width .2s ease; }
 .water-actions { display: flex; gap: 7px; flex-wrap: wrap; }
 .water-actions .btn { flex: 1 1 70px; min-width: 70px; padding: 10px 6px; font-size: .78rem; }
+.bw-chart-wrap { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; font-family: var(--mono); font-size: .72rem; color: var(--muted); }
+.bw-svg { width: 120px; height: 28px; overflow: visible; }
 
 /* NUTRIÇÃO */
 .nt-chips { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px; }
@@ -349,7 +367,7 @@ body {
 .nt-peek-meal:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
 .nt-peek-meal-name { color: var(--text); font-weight: 500; display: block; margin-bottom: 2px; }
 
-/* CONSISTÊNCIA SEMANAL */
+/* CONSISTÊNCIA SEMANAL & LEGENDA */
 .week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; text-align: center; }
 .week-day { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .week-day.today { border-color: var(--d2); }
@@ -360,6 +378,8 @@ body {
 .w-dot.ok-cardio { background: var(--high); }
 .w-dot.ok-supp { background: var(--med); }
 .w-dot.ok-hab { background: var(--d3); }
+.week-legend { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 10px; font-size: .68rem; color: var(--muted); }
+.week-legend span { display: inline-flex; align-items: center; gap: 4px; }
 
 /* DRAWERS & HISTÓRICO */
 .hist-entry { border-bottom: 1px solid var(--border); padding: 10px 0; }

@@ -1,5 +1,5 @@
 import { SUPP_ITEMS, WATER_MIN, WATER_MAX, FOOD_BANKS, NT_TIERS, NT_TIER_ORDER, NT_SCENARIO_TIER } from "../data.js";
-import { store, persist, isoToday } from "../store.js";
+import { store, persist, persistDebounced, isoToday, computeSuggestedScenario } from "../store.js";
 import { $, el, toast } from "../ui.js";
 
 let ntActiveTier = "";
@@ -8,7 +8,7 @@ export function initNutricaoModule() {
   const host = $("page-nutri");
   host.innerHTML = `
     <section class="section">
-      <div class="section-head"><h2 class="section-title">Água</h2><span class="section-meta" id="water-progress"></span></div>
+      <div class="section-head"><h2 class="section-title">Água & Peso Corporal</h2><span class="section-meta" id="water-progress"></span></div>
       <div class="card">
         <div class="water-row">
           <div class="water-amount" id="water-amount">0.00L</div>
@@ -20,6 +20,12 @@ export function initNutricaoModule() {
           <button class="btn" type="button" data-add="500">+500ml</button>
           <button class="btn" type="button" data-add="1000">+1L</button>
           <button class="btn btn-ghost" type="button" id="water-reset">Reset</button>
+        </div>
+
+        <div class="sess-row" style="border-top:1px solid var(--border); padding-top:12px; margin-top:14px; flex-wrap:wrap;">
+          <label for="bw-input">Peso hoje (jejum)</label>
+          <input class="load-input" type="number" step="0.1" inputMode="decimal" id="bw-input" placeholder="kg" style="width:86px;">
+          <div class="bw-chart-wrap" id="bw-chart-wrap" style="margin-left:auto; margin-top:0;"></div>
         </div>
       </div>
     </section>
@@ -83,7 +89,7 @@ export function initNutricaoModule() {
     btn.addEventListener("click", () => {
       store.dayUI.water = (store.dayUI.water || 0) + parseInt(btn.dataset.add, 10);
       renderWater();
-      persist();
+      persist(true);
     });
   });
 
@@ -91,25 +97,41 @@ export function initNutricaoModule() {
     if (!store.dayUI.water || !window.confirm("Zerar o contador de água de hoje?")) return;
     store.dayUI.water = 0;
     renderWater();
-    persist();
+    persist(true);
+  });
+
+  $("bw-input").addEventListener("input", e => {
+    const val = e.target.value !== "" ? parseFloat(e.target.value) : null;
+    store.dayUI.weight = val;
+    if (val != null && !isNaN(val)) {
+      store.bodyWeight[isoToday()] = val;
+    } else {
+      delete store.bodyWeight[isoToday()];
+    }
+    renderBodyWeightChart();
+    persistDebounced(300);
   });
 
   $("supp-filter-btn").addEventListener("click", () => {
     store.ntState.suppFilter = store.ntState.suppFilter === "all" ? "auto" : "all";
-    persist();
+    persist(true);
     renderSupp();
   });
 
-  $("nt-auto-suggest").addEventListener("click", autoSuggestScenario);
+  $("nt-auto-suggest").addEventListener("click", () => {
+    const sc = computeSuggestedScenario();
+    ntSelect(sc, false, true);
+    toast("Cenário atualizado com base na janela de 36h");
+  });
 
   $("nt-chips").querySelectorAll(".nt-chip").forEach(chip => {
-    chip.addEventListener("click", () => ntSelect(chip.dataset.scenario, false));
+    chip.addEventListener("click", () => ntSelect(chip.dataset.scenario, false, true));
   });
 
   $("nt-pill-toggle").querySelectorAll(".nt-pill").forEach(pill => {
     pill.addEventListener("click", () => {
       store.ntState.mode = pill.dataset.mode;
-      persist();
+      persist(true);
       renderNutricaoModule();
     });
   });
@@ -131,34 +153,14 @@ function isWorkoutDay() {
   return true;
 }
 
-function autoSuggestScenario() {
-  const hour = new Date().getHours();
-  if (!store.hist.length) {
-    const sc = hour < 14 ? "high-am" : "high-pm";
-    ntSelect(sc, false);
-    toast(`Sugerido: ${sc === "high-am" ? "Treino Manhã" : "Treino Noite"}`);
-    return;
-  }
-  const last = store.hist[store.hist.length - 1];
-  const hoursSince = (Date.now() - (last.ts || 0)) / (3600 * 1000);
-  let suggested = "high-am";
-  if (hoursSince < 20) {
-    suggested = "rest-after-double";
-  } else if (hoursSince >= 20 && hoursSince < 34) {
-    suggested = hour < 15 ? "rest-next-am" : "high-pm";
-  } else {
-    suggested = hour < 14 ? "high-am" : "high-pm";
-  }
-  ntSelect(suggested, false);
-  toast("Cenário sugerido com base na última sessão");
-}
-
 export function renderNutricaoModule() {
   renderWater();
-  renderSupp();
-  if (store.ntState.scenario && NT_SCENARIO_TIER[store.ntState.scenario]) {
-    ntSelect(store.ntState.scenario, true);
+  renderBodyWeightChart();
+  if (!store.ntState.scenario || !NT_SCENARIO_TIER[store.ntState.scenario]) {
+    store.ntState.scenario = computeSuggestedScenario();
   }
+  // isUserAction = false no render automático para NUNCA atualizar store.ts no arranque!
+  ntSelect(store.ntState.scenario, true, false);
 }
 
 function renderWater() {
@@ -166,6 +168,66 @@ function renderWater() {
   $("water-amount").textContent = `${(ml / 1000).toFixed(2)}L`;
   $("water-bar-fill").style.width = `${Math.min(100, (ml / WATER_MAX) * 100)}%`;
   $("water-progress").textContent = ml >= WATER_MIN ? "✓ meta" : `${(ml / 1000).toFixed(2)}L / 3.5L`;
+}
+
+/* GRÁFICO DUPLO DE PESO CORPORAL: DIÁRIO (TRACEJADO) + MÉDIA MÓVEL 7 DIAS (LINHA CONTÍNUA) */
+function renderBodyWeightChart() {
+  const bwIn = $("bw-input");
+  const wrap = $("bw-chart-wrap");
+  if (!bwIn || !wrap) return;
+
+  const todayVal = store.dayUI.weight ?? store.bodyWeight[isoToday()] ?? null;
+  if (document.activeElement !== bwIn) {
+    bwIn.value = todayVal != null ? todayVal : "";
+  }
+
+  const allDates = Object.keys(store.bodyWeight).sort();
+  const validEntries = allDates
+    .map(d => ({ date: d, val: store.bodyWeight[d] }))
+    .filter(x => typeof x.val === "number" && !isNaN(x.val));
+
+  if (!validEntries.length) {
+    wrap.textContent = "Sem histórico de peso";
+    return;
+  }
+
+  // Calcular média móvel de até 7 registos para cada ponto e exibir os últimos 10 pontos
+  const recent = validEntries.slice(-10);
+  const dailyPts = recent.map(r => r.val);
+  const maPts = recent.map((_, idx) => {
+    const globalIdx = validEntries.length - recent.length + idx;
+    const win = validEntries.slice(Math.max(0, globalIdx - 6), globalIdx + 1).map(x => x.val);
+    return win.reduce((a, b) => a + b, 0) / win.length;
+  });
+
+  const latestMA = maPts[maPts.length - 1].toFixed(1);
+  if (recent.length < 2) {
+    wrap.innerHTML = `<span>MM7d: <b>${latestMA}kg</b></span>`;
+    return;
+  }
+
+  const allVals = [...dailyPts, ...maPts];
+  const min = Math.min(...allVals);
+  const max = Math.max(...allVals);
+  const span = max - min || 1;
+  const w = 88, h = 24;
+
+  const toCoords = arr => arr.map((val, idx) => {
+    const x = (idx / (arr.length - 1)) * w;
+    const y = h - ((val - min) / span) * (h - 6) - 3;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  const dailyPoly = toCoords(dailyPts);
+  const maPoly = toCoords(maPts);
+
+  wrap.innerHTML = `
+    <span title="Tracejado: diário · Linha: média móvel 7d">MM7d: <b style="color:var(--med)">${latestMA}kg</b></span>
+    <svg class="bw-svg" viewBox="0 0 ${w} ${h}" aria-label="Evolução do peso diário e média móvel de 7 dias">
+      <polyline fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2,2" opacity="0.7" points="${dailyPoly}"/>
+      <polyline fill="none" stroke="var(--med)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" points="${maPoly}"/>
+    </svg>
+  `;
 }
 
 function renderSupp() {
@@ -199,7 +261,7 @@ function renderSupp() {
       row.classList.toggle("done", !!store.dayUI.supp[item.id]);
       check.classList.toggle("checked", !!store.dayUI.supp[item.id]);
       updateCount();
-      persist();
+      persist(true);
     });
     row.appendChild(check);
     host.appendChild(row);
@@ -213,7 +275,7 @@ function ntResolve(scenario, mode) {
   return NT_SCENARIO_TIER[scenario] || "";
 }
 
-function ntSelect(scenario, keepMode) {
+function ntSelect(scenario, keepMode, isUserAction = false) {
   store.ntState.scenario = scenario;
   if (!keepMode) store.ntState.mode = "low";
 
@@ -240,8 +302,13 @@ function ntSelect(scenario, keepMode) {
 
   if (store.ntDone.tier !== ntActiveTier) {
     store.ntDone = { date: isoToday(), tier: ntActiveTier, checked: {} };
+    if (!isUserAction) {
+      persist(false); // Guarda cache local sem tocar em store.ts!
+    }
   }
-  persist();
+  if (isUserAction) {
+    persist(true);
+  }
   renderMeals(tier);
   $("nt-peek-panel").hidden = true;
   $("nt-peek-btn").textContent = "Consultar outros tiers";
@@ -270,7 +337,7 @@ function renderMeals(tier) {
       card.classList.toggle("nt-done", !!store.ntDone.checked[idx]);
       check.classList.toggle("nt-checked", !!store.ntDone.checked[idx]);
       updateProg();
-      persist();
+      persist(true);
     });
     top.appendChild(check);
     card.appendChild(top);

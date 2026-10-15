@@ -1,9 +1,17 @@
 import { PLAN } from "./data.js";
-import { store, loadStore, persist, onStoreChange } from "./store.js";
-import { $ } from "./ui.js";
-import { initTreinoModule } from "./modules/treino.js";
-import { initNutricaoModule } from "./modules/nutricao.js";
-import { initMetasModule } from "./modules/metas.js";
+import {
+  store, loadStore, persist, flushPendingPersist,
+  checkRolloverOnWake, onStoreChange, cloudSyncReconcile
+} from "./store.js";
+import { $, toast } from "./ui.js";
+import { initTreinoModule, renderTreinoModule } from "./modules/treino.js";
+import { initNutricaoModule, renderNutricaoModule } from "./modules/nutricao.js";
+import { initMetasModule, renderMetasModule } from "./modules/metas.js";
+
+function updateTopDate() {
+  const s = new Date().toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "short" });
+  $("today-label").textContent = s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 function updateNavBadges() {
   const items = PLAN[store.state.day].exercises;
@@ -17,7 +25,7 @@ function updateNavBadges() {
   $("nav-badge-metas").textContent = pendingTasks ? `· (${pendingTasks})` : "";
 }
 
-function switchPage(pageId) {
+function switchPage(pageId, isUserAction = true) {
   store.state.page = pageId;
   document.querySelectorAll(".page-view").forEach(v => {
     v.classList.toggle("active", v.id === pageId);
@@ -27,13 +35,22 @@ function switchPage(pageId) {
     t.classList.toggle("active", isAct);
     if (isAct) $("topbar-title").textContent = t.dataset.title;
   });
+  if (pageId === "page-metas") renderMetasModule();
+  if (pageId === "page-nutri") renderNutricaoModule();
   window.scrollTo({ top: 0, behavior: "instant" });
-  persist();
+  if (isUserAction) persist(true);
+}
+
+function rerenderAllModules() {
+  updateTopDate();
+  renderTreinoModule();
+  renderNutricaoModule();
+  renderMetasModule();
+  updateNavBadges();
 }
 
 async function bootstrap() {
-  const s = new Date().toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "short" });
-  $("today-label").textContent = s.charAt(0).toUpperCase() + s.slice(1);
+  updateTopDate();
 
   await loadStore();
 
@@ -45,12 +62,42 @@ async function bootstrap() {
   updateNavBadges();
 
   document.querySelectorAll(".nav-tab").forEach(tab => {
-    tab.addEventListener("click", () => switchPage(tab.dataset.target));
+    tab.addEventListener("click", () => switchPage(tab.dataset.target, true));
   });
 
   if (store.state.page) {
-    switchPage(store.state.page);
+    switchPage(store.state.page, false); // NUNCA altera store.ts no arranque!
   }
+
+  /* FLUSH IMEDIATO AO FECHAR E MUDANÇA DE DIA AUTOMÁTICA AO ACORDAR */
+  window.addEventListener("pagehide", () => flushPendingPersist());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      flushPendingPersist();
+    } else if (document.visibilityState === "visible") {
+      if (checkRolloverOnWake()) {
+        rerenderAllModules();
+        toast("Novo dia iniciado · vistos diários reiniciados");
+      }
+      cloudSyncReconcile(() => {
+        rerenderAllModules();
+        toast("Sincronizado com a Cloud");
+      });
+    }
+  });
+
+  window.addEventListener("online", () => {
+    cloudSyncReconcile(() => {
+      rerenderAllModules();
+      toast("Ligação retomada · dados sincronizados");
+    });
+  });
+
+  /* RECONCILIAÇÃO CLOUD NO ARRANQUE */
+  await cloudSyncReconcile(() => {
+    rerenderAllModules();
+    toast("Dados mais recentes carregados da Cloud");
+  });
 }
 
 document.addEventListener("DOMContentLoaded", bootstrap);

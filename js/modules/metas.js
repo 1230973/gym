@@ -1,6 +1,11 @@
 import { WATER_MIN } from "../data.js";
-import { store, persist, buildBlob, validateAndApplyBlob, freshToday, freshNtDone, isoToday, wipeAllData, cloudPush, cloudPull } from "../store.js";
+import {
+  store, persist, buildBlob, validateAndApplyBlob, freshToday, freshNtDone,
+  isoToday, wipeAllData, cloudConfig, saveCloudConfig, cloudPush, cloudPull,
+  computeExpectedSuppCount, generateSecureSyncId
+} from "../store.js";
 import { $, el, toast, fmtDate } from "../ui.js";
+import { isPersonalRecord } from "./treino.js";
 
 export function initMetasModule() {
   const host = $("page-metas");
@@ -8,10 +13,16 @@ export function initMetasModule() {
     <section class="section">
       <div class="section-head">
         <h2 class="section-title">Consistência (Últimos 7 Dias)</h2>
-        <span class="section-meta">Água · Cardio · Supp · Hábitos</span>
+        <button class="btn btn-sm btn-ghost" id="btn-copy-week" type="button" style="margin-left:auto;">Copiar Resumo</button>
       </div>
       <div class="card">
         <div class="week-grid" id="week-grid"></div>
+        <div class="week-legend">
+          <span><i class="w-dot ok-water"></i> Água (≥3.5L)</span>
+          <span><i class="w-dot ok-cardio"></i> Cardio (≥2)</span>
+          <span><i class="w-dot ok-supp"></i> Suplementos (100%)</span>
+          <span><i class="w-dot ok-hab"></i> Hábitos (100%)</span>
+        </div>
       </div>
     </section>
 
@@ -48,11 +59,16 @@ export function initMetasModule() {
 
     <section class="section">
       <details class="drawer">
-        <summary>Sincronização Cloud (Supabase REST)</summary>
-        <p class="cardio-foot" style="margin-bottom:10px;">Opcional: cria uma tabela <code>life_os_sync (id text primary key, payload jsonb, updated_at timestamptz)</code> no Supabase para sincronizar entre o telemóvel e o PC.</p>
+        <summary>Sincronização Cloud (Supabase Anon Key + RLS)</summary>
+        <p class="cardio-foot" style="margin-bottom:10px;">
+          Credenciais isoladas apenas neste dispositivo. Usa um <b>Sync ID aleatório de ≥32 caracteres</b> e ativa RLS na tabela <code>life_os_sync</code>.
+        </p>
         <div class="sess-row"><input class="text-input" type="url" id="cloud-url" placeholder="https://xyz.supabase.co"></div>
-        <div class="sess-row"><input class="text-input" type="password" id="cloud-key" placeholder="Supabase Anon/Service Key"></div>
-        <div class="sess-row"><input class="text-input" type="text" id="cloud-id" placeholder="ID (ex: tomas-main)"></div>
+        <div class="sess-row"><input class="text-input" type="password" id="cloud-key" placeholder="Supabase Anon Public Key"></div>
+        <div class="sess-row">
+          <input class="text-input" type="text" id="cloud-id" placeholder="Sync ID (≥32 chars)" style="font-family:var(--mono); font-size:.76rem;">
+          <button class="btn btn-sm" id="btn-gen-syncid" type="button">Gerar ID 32c</button>
+        </div>
         <div class="danger-row">
           <button class="btn" id="btn-cloud-push" type="button">Enviar p/ Cloud</button>
           <button class="btn" id="btn-cloud-pull" type="button">Puxar da Cloud</button>
@@ -74,6 +90,8 @@ export function initMetasModule() {
     </section>
   `;
 
+  $("btn-copy-week").addEventListener("click", copyWeeklySummary);
+
   $("btn-add-habit").addEventListener("click", addHabit);
   $("new-habit-name").addEventListener("keydown", e => { if (e.key === "Enter") addHabit(); });
 
@@ -83,34 +101,38 @@ export function initMetasModule() {
     const doneCount = store.tasks.filter(t => t.done).length;
     if (!doneCount) { toast("Sem tarefas concluídas para limpar"); return; }
     store.tasks = store.tasks.filter(t => !t.done);
-    persist();
+    persist(true);
     renderTasks();
     toast("Tarefas concluídas removidas");
   });
 
-  $("cloud-url").value = store.cloud.url || "";
-  $("cloud-key").value = store.cloud.key || "";
-  $("cloud-id").value = store.cloud.syncId || "tomas-main";
-  const saveCloudCfg = () => {
-    store.cloud.url = $("cloud-url").value.trim();
-    store.cloud.key = $("cloud-key").value.trim();
-    store.cloud.syncId = $("cloud-id").value.trim() || "tomas-main";
-    persist();
+  $("cloud-url").value = cloudConfig.url || "";
+  $("cloud-key").value = cloudConfig.key || "";
+  $("cloud-id").value = cloudConfig.syncId || "";
+  const persistCloudInputs = () => {
+    saveCloudConfig($("cloud-url").value, $("cloud-key").value, $("cloud-id").value);
+    $("cloud-id").value = cloudConfig.syncId;
+    toast("Configuração Cloud guardada localmente");
   };
-  $("cloud-url").addEventListener("change", saveCloudCfg);
-  $("cloud-key").addEventListener("change", saveCloudCfg);
-  $("cloud-id").addEventListener("change", saveCloudCfg);
+  $("cloud-url").addEventListener("change", persistCloudInputs);
+  $("cloud-key").addEventListener("change", persistCloudInputs);
+  $("cloud-id").addEventListener("change", persistCloudInputs);
+
+  $("btn-gen-syncid").addEventListener("click", () => {
+    $("cloud-id").value = generateSecureSyncId();
+    persistCloudInputs();
+  });
 
   $("btn-cloud-push").addEventListener("click", async () => {
-    saveCloudCfg();
-    const ok = await cloudPush();
-    toast(ok ? "Sincronizado com a Cloud!" : "Erro: verifica URL/Key do Supabase");
+    saveCloudConfig($("cloud-url").value, $("cloud-key").value, $("cloud-id").value);
+    const ok = await cloudPush(buildBlob());
+    toast(ok ? "Sincronizado com a Cloud!" : "Erro: verifica URL/Anon Key do Supabase");
   });
 
   $("btn-cloud-pull").addEventListener("click", async () => {
-    saveCloudCfg();
+    saveCloudConfig($("cloud-url").value, $("cloud-key").value, $("cloud-id").value);
     const ok = await cloudPull();
-    if (ok) { toast("Dados puxados da Cloud!"); setTimeout(() => window.location.reload(), 600); }
+    if (ok) { toast("Dados puxados da Cloud!"); setTimeout(() => window.location.reload(), 500); }
     else toast("Não foi possível puxar da Cloud");
   });
 
@@ -123,7 +145,7 @@ export function initMetasModule() {
     a.download = `life-os-backup-${isoToday()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    toast("Backup exportado");
+    toast("Backup exportado (sem chaves Cloud)");
   });
 
   $("btn-import").addEventListener("click", () => $("import-file").click());
@@ -134,7 +156,7 @@ export function initMetasModule() {
     r.onload = () => {
       try {
         validateAndApplyBlob(JSON.parse(r.result));
-        persist();
+        persist(true);
         toast("Backup importado com sucesso");
         setTimeout(() => window.location.reload(), 500);
       } catch (err) {
@@ -154,7 +176,7 @@ export function initMetasModule() {
       store.dayUI.cardio = {};
     }
     store.ntDone = freshNtDone();
-    persist();
+    persist(true);
     window.location.reload();
   });
 
@@ -173,12 +195,9 @@ export function renderMetasModule() {
   renderTasks();
 }
 
-function renderWeeklyConsistency() {
-  const host = $("week-grid");
-  if (!host) return;
-  host.innerHTML = "";
+function getLast7DaysSnapshots() {
   const todayIso = isoToday();
-
+  const list = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
@@ -187,20 +206,86 @@ function renderWeeklyConsistency() {
       water: store.dayUI.water || 0,
       cardioDone: Object.values(store.dayUI.cardio || {}).filter(c => c && c.done).length,
       suppDone: Object.values(store.dayUI.supp || {}).filter(Boolean).length,
-      habitsDone: Object.values(store.dayUI.habitsDone || {}).filter(Boolean).length
-    } : (store.dailyLogs[iso] || { water: 0, cardioDone: 0, suppDone: 0, habitsDone: 0 });
+      suppTarget: computeExpectedSuppCount(store.ntState?.scenario, store.ntState?.suppFilter),
+      habitsDone: Object.values(store.dayUI.habitsDone || {}).filter(Boolean).length,
+      habitsTarget: (store.habits || []).length,
+      weight: store.dayUI.weight ?? store.bodyWeight[iso] ?? null
+    } : (store.dailyLogs[iso] || {
+      water: 0,
+      cardioDone: 0,
+      suppDone: 0,
+      suppTarget: 4,
+      habitsDone: 0,
+      habitsTarget: store.habits.length || 1,
+      weight: store.bodyWeight[iso] ?? null
+    });
+    list.push({ dateObj: d, iso, snap });
+  }
+  return list;
+}
 
+function renderWeeklyConsistency() {
+  const host = $("week-grid");
+  if (!host) return;
+  host.innerHTML = "";
+  const todayIso = isoToday();
+  const days = getLast7DaysSnapshots();
+
+  days.forEach(({ dateObj, iso, snap }) => {
     const col = el("div", `week-day${iso === todayIso ? " today" : ""}`);
-    const dayLbl = d.toLocaleDateString("pt-PT", { weekday: "short" }).replace(".", "");
-    col.appendChild(el("span", "week-label", `${dayLbl} ${d.getDate()}`));
+    const dayLbl = dateObj.toLocaleDateString("pt-PT", { weekday: "short" }).replace(".", "");
+    col.appendChild(el("span", "week-label", `${dayLbl} ${dateObj.getDate()}`));
+
+    const suppTarget = snap.suppTarget || 4;
+    const habTarget = snap.habitsTarget || store.habits.length || 1;
 
     const dots = el("div", "week-dots");
     dots.appendChild(el("span", `w-dot${snap.water >= WATER_MIN ? " ok-water" : ""}`));
     dots.appendChild(el("span", `w-dot${snap.cardioDone >= 2 ? " ok-cardio" : ""}`));
-    dots.appendChild(el("span", `w-dot${snap.suppDone >= 4 ? " ok-supp" : ""}`));
-    dots.appendChild(el("span", `w-dot${snap.habitsDone >= 1 ? " ok-hab" : ""}`));
+    dots.appendChild(el("span", `w-dot${snap.suppDone >= suppTarget && suppTarget > 0 ? " ok-supp" : ""}`));
+    dots.appendChild(el("span", `w-dot${snap.habitsDone >= habTarget && habTarget > 0 ? " ok-hab" : ""}`));
     col.appendChild(dots);
     host.appendChild(col);
+  });
+}
+
+function copyWeeklySummary() {
+  const days = getLast7DaysSnapshots();
+  const startIso = days[0].iso;
+
+  const weekSessions = store.hist.filter(h => h.date >= startIso);
+  const totalCardio = days.reduce((acc, d) => acc + (d.snap.cardioDone || 0), 0);
+  const avgWater = (days.reduce((acc, d) => acc + (d.snap.water || 0), 0) / 7 / 1000).toFixed(2);
+  const weights = days.map(d => d.snap.weight).filter(w => typeof w === "number" && !isNaN(w));
+  const avgWeight = weights.length ? (weights.reduce((a, b) => a + b, 0) / weights.length).toFixed(1) + "kg" : "—";
+
+  // Contabilizar PRs reais batidos nas sessões dos últimos 7 dias (ignorando SEED)
+  let prCount = 0;
+  weekSessions.forEach(sess => {
+    const sessIdx = store.hist.indexOf(sess);
+    if (sessIdx > 0) {
+      Object.keys(sess.entries || {}).forEach(exName => {
+        const e = sess.entries[exName];
+        if (isPersonalRecord(sess.day, exName, e?.kg, e?.reps, sessIdx - 1)) {
+          prCount++;
+        }
+      });
+    }
+  });
+
+  const summary = [
+    `📊 Resumo Semanal Life OS (${fmtDate(startIso)} a ${fmtDate(isoToday())})`,
+    `• Sessões HIT concluídas: ${weekSessions.length}`,
+    `• Recordes Pessoais (PRs): ${prCount}`,
+    `• Blocos de Passadeira: ${totalCardio} sessões`,
+    `• Média de Água: ${avgWater}L / dia`,
+    `• Peso Médio (MM7d): ${avgWeight}`
+  ].join("\n");
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(summary).then(() => toast("Resumo semanal copiado!"));
+  } else {
+    toast("Não foi possível copiar");
   }
 }
 
@@ -216,7 +301,7 @@ function addHabit() {
   });
   nameIn.value = "";
   catIn.value = "";
-  persist();
+  persist(true);
   renderHabits();
   renderWeeklyConsistency();
 }
@@ -244,7 +329,7 @@ function renderHabits() {
       row.classList.toggle("done", !!store.dayUI.habitsDone[h.id]);
       check.classList.toggle("checked", !!store.dayUI.habitsDone[h.id]);
       updateCount();
-      persist();
+      persist(true);
       renderWeeklyConsistency();
     });
     row.appendChild(check);
@@ -255,8 +340,9 @@ function renderHabits() {
     del.addEventListener("click", () => {
       if (!window.confirm(`Remover o hábito "${h.name}"?`)) return;
       store.habits = store.habits.filter(item => item.id !== h.id);
-      persist();
+      persist(true);
       renderHabits();
+      renderWeeklyConsistency();
     });
     row.appendChild(del);
 
@@ -279,7 +365,7 @@ function addTask() {
     done: false
   });
   titleIn.value = "";
-  persist();
+  persist(true);
   renderTasks();
 }
 
@@ -315,7 +401,7 @@ function renderTasks() {
     check.setAttribute("aria-label", `Marcar tarefa ${t.title}`);
     check.addEventListener("click", () => {
       t.done = !t.done;
-      persist();
+      persist(true);
       renderTasks();
     });
     row.appendChild(check);
@@ -325,7 +411,7 @@ function renderTasks() {
     del.setAttribute("aria-label", `Apagar tarefa ${t.title}`);
     del.addEventListener("click", () => {
       store.tasks = store.tasks.filter(item => item.id !== t.id);
-      persist();
+      persist(true);
       renderTasks();
     });
     row.appendChild(del);

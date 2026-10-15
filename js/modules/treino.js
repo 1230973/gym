@@ -1,16 +1,42 @@
 import { PLAN, EXERCISE_RANGE, SEED, CARDIO_SLOTS } from "../data.js";
-import { store, persist, persistDebounced, isoToday } from "../store.js";
-import { $, el, toast, fmtDate, fmtEntry, beepAndVibrate } from "../ui.js";
+import { store, persist, persistDebounced, isoToday, computeSuggestedScenario } from "../store.js";
+import { $, el, toast, fmtDate, fmtEntry, unlockAudioContext, beepAndVibrate } from "../ui.js";
 
+/* CRONÓMETRO + WAKE LOCK API (Mantém ecrã e áudio vivos na passadeira) */
 let timerInterval = null;
+let timerRunning = false;
+let timerEndTime = 0;
 let timerTotalSec = 15 * 60;
 let timerRemSec = 15 * 60;
-let timerRunning = false;
+let timerLastBlockIdx = 0;
+let wakeLockSentinel = null;
+
+async function requestScreenWakeLock() {
+  if (!("wakeLock" in navigator) || !timerRunning) return;
+  try {
+    if (!wakeLockSentinel || wakeLockSentinel.released) {
+      wakeLockSentinel = await navigator.wakeLock.request("screen");
+    }
+  } catch (e) {}
+}
+
+async function releaseScreenWakeLock() {
+  try {
+    if (wakeLockSentinel) {
+      await wakeLockSentinel.release();
+      wakeLockSentinel = null;
+    }
+  } catch (e) {}
+}
 
 export function initTreinoModule() {
   const host = $("page-treino");
   host.innerHTML = `
     <div id="recovery-banner" class="rec-banner" hidden></div>
+    <div id="edit-banner" class="edit-banner" hidden>
+      <span id="edit-banner-text">A editar sessão do histórico</span>
+      <button class="btn btn-sm" id="btn-cancel-edit" type="button">Cancelar edição</button>
+    </div>
 
     <section class="section">
       <div class="section-head">
@@ -48,9 +74,9 @@ export function initTreinoModule() {
       <div class="card">
         <div class="timer-box">
           <div class="timer-left">
-            <span class="timer-phase" id="timer-phase">Passo Normal (3m)</span>
+            <span class="timer-phase" id="timer-phase">🚶 Passo Normal (3m)</span>
             <span class="timer-clock" id="timer-clock">15:00</span>
-            <span class="timer-sub" id="timer-sub">Bloco 1/5 · muda aos 12:00</span>
+            <span class="timer-sub" id="timer-sub">Bloco 1/5 · alterna a cada 3 min</span>
           </div>
           <div class="timer-btns">
             <button class="btn btn-sm" id="timer-start" type="button">Iniciar</button>
@@ -59,7 +85,7 @@ export function initTreinoModule() {
         </div>
         <div id="cardio-card"></div>
       </div>
-      <p class="cardio-foot">3 min passo normal (a falar sem esforço) + 3 min passo acelerado, a repetir até ao tempo. Mínimo 2 sessões por dia; a terceira só se der jeito.</p>
+      <p class="cardio-foot">3 min passo normal + 3 min passo acelerado. O cronómetro mantém o ecrã acordado (Wake Lock) para os beeps tocarem sempre e marca o slot no fim.</p>
     </section>
 
     <section class="section">
@@ -70,7 +96,7 @@ export function initTreinoModule() {
           <li><strong>Volume:</strong> 1 série de trabalho efetiva por exercício, até à falha concêntrica pura.</li>
           <li><strong>Reps:</strong> compostos 6-8; isolamentos 8-12; gémeos e abs 10-15.</li>
           <li><strong>Cadência:</strong> excêntrica controlada 2-3s, pausa de 1s no estiramento/pico, concêntrica explosiva.</li>
-          <li><strong>Progressão:</strong> dupla progressão automática (se atingires o topo da janela na sessão anterior, aparece a etiqueta verde <b>↑ Subir carga</b>).</li>
+          <li><strong>Critério de PR (🏆 PR):</strong> dispara quando superas a tua carga máxima histórica (kg) ou fazes mais repetições na tua carga máxima (ignora os valores iniciais de referência).</li>
           <li><strong>Recuperação:</strong> dia sim dia não, ou janelas de 36h (10h manhã / 22h noite).</li>
         </ul>
       </details>
@@ -79,33 +105,54 @@ export function initTreinoModule() {
 
   $("day-chips").querySelectorAll(".day-chip").forEach(chip => {
     chip.addEventListener("click", () => {
+      if (store.editSession) cancelHistEdit(false);
       store.state.day = chip.dataset.day;
-      persist();
+      persist(true);
       renderTreinoModule();
     });
   });
 
   $("sess-date").addEventListener("change", e => {
     store.dayUI.date = e.target.value;
-    persist();
+    persist(true);
   });
 
   $("sleep-toggle").addEventListener("click", () => {
     store.dayUI.sleepOk = !store.dayUI.sleepOk;
     renderSleepToggle();
-    persist();
+    persist(true);
   });
 
   $("btn-save").addEventListener("click", saveSession);
   $("btn-copy").addEventListener("click", copySession);
+  $("btn-cancel-edit").addEventListener("click", () => cancelHistEdit(true));
 
   $("timer-start").addEventListener("click", toggleCardioTimer);
   $("timer-reset").addEventListener("click", resetCardioTimer);
 
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && timerRunning) {
+      requestScreenWakeLock();
+      tickCardioTimer();
+    }
+  });
+
+  syncTimerDurationFromNextSlot();
   renderTreinoModule();
 }
 
+function findEditingSessionIndex() {
+  if (!store.editSession || !store.editSession.targetTs) return -1;
+  return store.hist.findIndex(h => Number(h.ts) === Number(store.editSession.targetTs));
+}
+
 export function renderTreinoModule() {
+  const editIdx = findEditingSessionIndex();
+  if (store.editSession && editIdx === -1) {
+    // Caso um sync remoto tenha removido a sessão que estava em edição, restaura o rascunho de forma segura
+    cancelHistEdit(false);
+  }
+
   const plan = PLAN[store.state.day];
   document.documentElement.style.setProperty("--day-color", plan.color);
 
@@ -115,6 +162,18 @@ export function renderTreinoModule() {
 
   $("sess-focus").textContent = `Dia ${store.state.day} — ${plan.focus}`;
   $("sess-date").value = store.dayUI.date || isoToday();
+
+  const editBanner = $("edit-banner");
+  const saveBtn = $("btn-save");
+  if (editIdx !== -1) {
+    editBanner.hidden = false;
+    const h = store.hist[editIdx];
+    $("edit-banner-text").textContent = `A editar histórico: Dia ${h.day} (${fmtDate(h.date)})`;
+    saveBtn.textContent = "Guardar alterações";
+  } else {
+    editBanner.hidden = true;
+    saveBtn.textContent = "Guardar e avançar";
+  }
 
   renderRecoveryBanner();
   renderSleepToggle();
@@ -171,10 +230,12 @@ function renderSleepToggle() {
 }
 
 function lastFromHistory(day, name) {
+  const editIdx = findEditingSessionIndex();
+  const maxIdx = editIdx !== -1 ? editIdx - 1 : store.hist.length - 1;
   let hasSavedDay = false;
-  for (let i = store.hist.length - 1; i >= 0; i--) {
+  for (let i = maxIdx; i >= 0; i--) {
     const h = store.hist[i];
-    if (h.day === day) {
+    if (h && h.day === day) {
       hasSavedDay = true;
       if (h.entries && h.entries[name]) {
         const e = h.entries[name];
@@ -188,11 +249,34 @@ function lastFromHistory(day, name) {
   return null;
 }
 
+/* PR REAL: Ignora SEED. Compara apenas contra sessões reais gravadas no histórico (Carga Máxima ou +Reps na Carga Máxima) */
+export function isPersonalRecord(day, name, kg, reps, upToIndex = null) {
+  if (typeof kg !== "number" || typeof reps !== "number" || kg <= 0 || reps <= 0) return false;
+  const editIdx = findEditingSessionIndex();
+  const maxIdx = upToIndex !== null ? upToIndex : (editIdx !== -1 ? editIdx - 1 : store.hist.length - 1);
+
+  let bestKg = -1;
+  let bestRepsAtMaxKg = -1;
+
+  for (let i = 0; i <= maxIdx; i++) {
+    const h = store.hist[i];
+    if (h && h.day === day && h.entries?.[name]) {
+      const e = h.entries[name];
+      if (typeof e.kg === "number" && typeof e.reps === "number" && e.kg > 0 && e.reps > 0) {
+        if (e.kg > bestKg || (e.kg === bestKg && e.reps > bestRepsAtMaxKg)) {
+          bestKg = e.kg;
+          bestRepsAtMaxKg = e.reps;
+        }
+      }
+    }
+  }
+
+  if (bestKg < 0) return false; // Só mostra PR quando já existe pelo menos 1 sessão real anterior para bater
+  return kg > bestKg || (kg === bestKg && reps > bestRepsAtMaxKg);
+}
+
 function getExerciseSparklinePoints(day, name) {
   const pts = [];
-  if (SEED[day] && SEED[day][name] && typeof SEED[day][name].kg === "number") {
-    pts.push(SEED[day][name].kg);
-  }
   store.hist.forEach(h => {
     if (h.day === day && h.entries && h.entries[name] && typeof h.entries[name].kg === "number") {
       pts.push(h.entries[name].kg);
@@ -260,7 +344,7 @@ function renderExercises() {
       card.classList.toggle("done", !!store.dayUI.ex[key]);
       check.classList.toggle("checked", !!store.dayUI.ex[key]);
       updateExerciseProgress();
-      persist();
+      persist(true);
     });
     top.appendChild(check);
     card.appendChild(top);
@@ -277,9 +361,11 @@ function renderExercises() {
     }
 
     const hint = computeProgressionHint(last, range);
-    if (hint) {
-      subRow.appendChild(el("span", hint.cls, hint.text));
-    }
+    if (hint) subRow.appendChild(el("span", hint.cls, hint.text));
+
+    const prBadge = el("span", "pr-badge", "🏆 PR");
+    prBadge.hidden = !isPersonalRecord(day, name, entry.kg, entry.reps);
+    subRow.appendChild(prBadge);
 
     const spark = createSparklineSVG(getExerciseSparklinePoints(day, name));
     if (spark) subRow.appendChild(spark);
@@ -295,13 +381,6 @@ function renderExercises() {
     kg.placeholder = "kg";
     kg.setAttribute("aria-label", `Carga em kg para ${name}`);
     kg.value = entry.kg != null ? entry.kg : "";
-    kg.addEventListener("input", () => {
-      entry.kg = kg.value !== "" ? parseFloat(kg.value) : null;
-      persistDebounced(300);
-    });
-    row.appendChild(kg);
-
-    row.appendChild(el("span", "load-x", "×"));
 
     const reps = document.createElement("input");
     reps.className = "load-input";
@@ -311,8 +390,23 @@ function renderExercises() {
     reps.placeholder = "reps";
     reps.setAttribute("aria-label", `Repetições para ${name}`);
     reps.value = entry.reps != null ? entry.reps : "";
+
+    const refreshPR = () => {
+      prBadge.hidden = !isPersonalRecord(day, name, entry.kg, entry.reps);
+    };
+
+    kg.addEventListener("input", () => {
+      entry.kg = kg.value !== "" ? parseFloat(kg.value) : null;
+      refreshPR();
+      persistDebounced(300);
+    });
+    row.appendChild(kg);
+
+    row.appendChild(el("span", "load-x", "×"));
+
     reps.addEventListener("input", () => {
       entry.reps = reps.value !== "" ? parseInt(reps.value, 10) : null;
+      refreshPR();
       persistDebounced(300);
     });
     row.appendChild(reps);
@@ -340,7 +434,8 @@ function renderExercises() {
         entry.kg = last.kg;
         entry.reps = last.reps;
         entry.note = last.note || "";
-        persist();
+        refreshPR();
+        persist(true);
         toast("Valores anteriores copiados");
       });
     } else {
@@ -353,6 +448,18 @@ function renderExercises() {
   });
 
   updateExerciseProgress();
+}
+
+function cancelHistEdit(showNotification = true) {
+  if (store.editSession && store.editSession.draft) {
+    store.state.day = store.editSession.draft.day;
+    store.dayUI.date = store.editSession.draft.date;
+    store.log = store.editSession.draft.log;
+  }
+  store.editSession = null;
+  persist(true);
+  renderTreinoModule();
+  if (showNotification) toast("Edição cancelada · rascunho restaurado");
 }
 
 function saveSession() {
@@ -373,6 +480,36 @@ function saveSession() {
     return;
   }
 
+  /* SE ESTIVER EM MODO DE EDIÇÃO: VALIDA O ÍNDICE PELO TS ÚNICO ANTES DE GRAVAR */
+  if (store.editSession) {
+    const editIdx = findEditingSessionIndex();
+    if (editIdx === -1) {
+      cancelHistEdit(false);
+      toast("Erro: A sessão original já não existe no histórico.");
+      return;
+    }
+    store.hist[editIdx] = {
+      ...store.hist[editIdx],
+      day,
+      focus: plan.focus,
+      date: store.dayUI.date || isoToday(),
+      entries
+    };
+    if (store.editSession.draft) {
+      store.state.day = store.editSession.draft.day;
+      store.dayUI.date = store.editSession.draft.date;
+      store.log = store.editSession.draft.log;
+    } else {
+      store.log[day] = {};
+    }
+    store.editSession = null;
+    persist(true);
+    renderTreinoModule();
+    toast("Sessão do histórico atualizada");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
   store.hist.push({
     day,
     focus: plan.focus,
@@ -384,7 +521,8 @@ function saveSession() {
   store.log[day] = {};
   store.dayUI.ex = {};
   store.state.day = day === "1" ? "2" : (day === "2" ? "3" : "1");
-  persist();
+  store.ntState.scenario = computeSuggestedScenario();
+  persist(true);
 
   renderTreinoModule();
   toast(`Sessão guardada · segue o Dia ${store.state.day}`);
@@ -428,56 +566,105 @@ function copySession() {
   }
 }
 
-/* CRONÓMETRO DA PASSADEIRA (3m Normal / 3m Rápido) */
+/* CRONÓMETRO DA PASSADEIRA BASEADO EM ENDTIME + WAKE LOCK */
+function getNextPendingCardioSlot() {
+  for (const s of CARDIO_SLOTS) {
+    const rec = store.dayUI.cardio[s.id];
+    if (!rec || !rec.done) return s;
+  }
+  return CARDIO_SLOTS[0];
+}
+
+function syncTimerDurationFromNextSlot() {
+  if (timerRunning) return;
+  const nextSlot = getNextPendingCardioSlot();
+  const rec = store.dayUI.cardio[nextSlot.id] || { min: "15" };
+  const mins = Math.max(1, parseInt(rec.min, 10) || 15);
+  timerTotalSec = mins * 60;
+  timerRemSec = timerTotalSec;
+  timerLastBlockIdx = 0;
+  updateTimerUI();
+}
+
 function updateTimerUI() {
+  const clockEl = $("timer-clock");
+  if (!clockEl) return;
   const mins = Math.floor(timerRemSec / 60);
   const secs = timerRemSec % 60;
-  $("timer-clock").textContent = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  clockEl.textContent = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 
-  const elapsed = timerTotalSec - timerRemSec;
+  const totalBlocks = Math.max(1, Math.ceil(timerTotalSec / 180));
+  const elapsed = Math.max(0, timerTotalSec - timerRemSec);
   const blockIdx = Math.floor(elapsed / 180);
   const isFast = blockIdx % 2 === 1;
   const phaseEl = $("timer-phase");
   phaseEl.textContent = isFast ? "🔥 Passo Acelerado (3m)" : "🚶 Passo Normal (3m)";
   phaseEl.classList.toggle("fast", isFast);
-  $("timer-sub").textContent = `Bloco ${Math.min(blockIdx + 1, 5)}/5 · alterna a cada 3 min`;
+  $("timer-sub").textContent = `Bloco ${Math.min(blockIdx + 1, totalBlocks)}/${totalBlocks} · alterna a cada 3 min`;
+}
+
+function tickCardioTimer() {
+  if (!timerRunning) return;
+  const remMs = timerEndTime - Date.now();
+  if (remMs <= 0) {
+    clearInterval(timerInterval);
+    timerRunning = false;
+    timerRemSec = 0;
+    releaseScreenWakeLock();
+    $("timer-start").textContent = "Iniciar";
+    updateTimerUI();
+    beepAndVibrate("finish");
+
+    const slotToMark = getNextPendingCardioSlot();
+    if (slotToMark) {
+      store.dayUI.cardio[slotToMark.id] = store.dayUI.cardio[slotToMark.id] || { done: false, min: "15" };
+      store.dayUI.cardio[slotToMark.id].done = true;
+      persist(true);
+      renderCardio();
+      toast(`Concluído! "${slotToMark.name}" marcado como feito.`);
+    }
+    syncTimerDurationFromNextSlot();
+    return;
+  }
+
+  timerRemSec = Math.ceil(remMs / 1000);
+  const elapsed = timerTotalSec - timerRemSec;
+  const currentBlockIdx = Math.floor(elapsed / 180);
+  if (currentBlockIdx > timerLastBlockIdx) {
+    timerLastBlockIdx = currentBlockIdx;
+    beepAndVibrate("switch");
+    toast(currentBlockIdx % 2 === 1 ? "🔥 Muda para Passo Acelerado!" : "🚶 Muda para Passo Normal!");
+  }
+  updateTimerUI();
 }
 
 function toggleCardioTimer() {
+  unlockAudioContext();
   const btn = $("timer-start");
   if (timerRunning) {
+    tickCardioTimer();
     clearInterval(timerInterval);
     timerRunning = false;
+    releaseScreenWakeLock();
     btn.textContent = "Retomar";
     return;
   }
+  if (timerRemSec <= 0 || timerRemSec === timerTotalSec) {
+    syncTimerDurationFromNextSlot();
+  }
   timerRunning = true;
+  timerEndTime = Date.now() + timerRemSec * 1000;
+  requestScreenWakeLock();
   btn.textContent = "Pausa";
-  timerInterval = setInterval(() => {
-    if (timerRemSec <= 0) {
-      clearInterval(timerInterval);
-      timerRunning = false;
-      btn.textContent = "Iniciar";
-      beepAndVibrate("finish");
-      toast("15 min de passadeira concluídos!");
-      return;
-    }
-    timerRemSec--;
-    const elapsed = timerTotalSec - timerRemSec;
-    if (timerRemSec > 0 && elapsed % 180 === 0) {
-      beepAndVibrate("switch");
-      toast(Math.floor(elapsed / 180) % 2 === 1 ? "Muda para Passo Acelerado!" : "Muda para Passo Normal!");
-    }
-    updateTimerUI();
-  }, 1000);
+  timerInterval = setInterval(tickCardioTimer, 500);
 }
 
 function resetCardioTimer() {
   clearInterval(timerInterval);
   timerRunning = false;
-  timerRemSec = timerTotalSec;
+  releaseScreenWakeLock();
   $("timer-start").textContent = "Iniciar";
-  updateTimerUI();
+  syncTimerDurationFromNextSlot();
 }
 
 function renderCardio() {
@@ -503,7 +690,11 @@ function renderCardio() {
     min.inputMode = "numeric";
     min.setAttribute("aria-label", `Minutos de passadeira ${s.name}`);
     min.value = rec.min;
-    min.addEventListener("input", () => { rec.min = min.value; persistDebounced(300); });
+    min.addEventListener("input", () => {
+      rec.min = min.value;
+      syncTimerDurationFromNextSlot();
+      persistDebounced(300);
+    });
     row.appendChild(min);
 
     const check = el("button", `check${rec.done ? " checked" : ""}`);
@@ -514,7 +705,8 @@ function renderCardio() {
       row.classList.toggle("done", rec.done);
       check.classList.toggle("checked", rec.done);
       updateCount();
-      persist();
+      syncTimerDurationFromNextSlot();
+      persist(true);
     });
     row.appendChild(check);
     host.appendChild(row);
@@ -523,7 +715,7 @@ function renderCardio() {
   updateCount();
 }
 
-/* HISTÓRICO COM EDITAR E APAGAR */
+/* HISTÓRICO COM EDIÇÃO PERSISTIDA POR TS ÚNICO */
 function renderHistory() {
   const host = $("hist-list");
   host.innerHTML = "";
@@ -532,25 +724,37 @@ function renderHistory() {
     return;
   }
 
+  const activeTargetTs = store.editSession?.targetTs ?? null;
+
   store.hist.slice().reverse().forEach((s, revIdx) => {
     const realIdx = store.hist.length - 1 - revIdx;
+    const isEditingThis = activeTargetTs !== null && Number(s.ts) === Number(activeTargetTs);
+
     const entry = el("div", "hist-entry");
     const head = el("div", "hist-head");
     head.appendChild(el("span", "hist-day", `Dia ${s.day} — ${s.focus}`));
     head.appendChild(el("span", "hist-date", fmtDate(s.date)));
 
-    const editBtn = el("button", "btn btn-sm", "Editar");
+    const editBtn = el("button", "btn btn-sm", isEditingThis ? "Em edição" : "Editar");
     editBtn.type = "button";
+    editBtn.disabled = isEditingThis;
     editBtn.setAttribute("aria-label", `Editar sessão de ${fmtDate(s.date)}`);
     editBtn.addEventListener("click", () => {
-      if (!window.confirm("Carregar esta sessão nos campos atuais para editar? (Será removida do histórico até voltares a guardar)")) return;
+      const draftToSave = store.editSession?.draft || {
+        day: store.state.day,
+        date: store.dayUI.date,
+        log: JSON.parse(JSON.stringify(store.log))
+      };
+      store.editSession = {
+        targetTs: s.ts,
+        draft: draftToSave
+      };
       store.state.day = s.day;
       store.dayUI.date = s.date;
       store.log[s.day] = JSON.parse(JSON.stringify(s.entries));
-      store.hist.splice(realIdx, 1);
-      persist();
+      persist(true);
       renderTreinoModule();
-      toast("Sessão carregada para edição");
+      toast("Modo de edição ativo (sobrevive mesmo se fechares a app)");
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
     head.appendChild(editBtn);
@@ -559,9 +763,10 @@ function renderHistory() {
     delBtn.type = "button";
     delBtn.setAttribute("aria-label", `Apagar sessão de ${fmtDate(s.date)}`);
     delBtn.addEventListener("click", () => {
-      if (!window.confirm(`Apagar do histórico a sessão Dia ${s.day} (${fmtDate(s.date)})?`)) return;
+      if (!window.confirm(`Apagar definitivamente do histórico a sessão Dia ${s.day} (${fmtDate(s.date)})?`)) return;
+      if (isEditingThis) cancelHistEdit(false);
       store.hist.splice(realIdx, 1);
-      persist();
+      persist(true);
       renderTreinoModule();
       toast("Sessão apagada do histórico");
     });

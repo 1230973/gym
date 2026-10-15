@@ -13,7 +13,7 @@ export function toast(msg) {
   t.textContent = msg;
   t.classList.add("show");
   clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.remove("show"), 2100);
+  t._timer = setTimeout(() => t.classList.remove("show"), 2200);
 }
 
 export function fmtDate(iso) {
@@ -34,25 +34,47 @@ export function fmtEntry(e) {
   return "—";
 }
 
+let sharedAudioCtx = null;
+
+export function unlockAudioContext() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!sharedAudioCtx) sharedAudioCtx = new Ctx();
+    if (sharedAudioCtx.state === "suspended") {
+      sharedAudioCtx.resume();
+    }
+    const osc = sharedAudioCtx.createOscillator();
+    const gain = sharedAudioCtx.createGain();
+    gain.gain.value = 0.0001;
+    osc.connect(gain);
+    gain.connect(sharedAudioCtx.destination);
+    osc.start(0);
+    osc.stop(sharedAudioCtx.currentTime + 0.02);
+  } catch (e) {}
+}
+
 export function beepAndVibrate(type = "switch") {
   try {
-    if (navigator.vibrate) {
+    if (typeof navigator.vibrate === "function") {
       navigator.vibrate(type === "finish" ? [250, 100, 250, 100, 350] : [180, 80, 180]);
     }
   } catch (e) {}
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    if (!sharedAudioCtx) sharedAudioCtx = new Ctx();
+    if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume();
+
+    const osc = sharedAudioCtx.createOscillator();
+    const gain = sharedAudioCtx.createGain();
     osc.type = "sine";
     osc.frequency.value = type === "finish" ? 880 : 620;
-    gain.gain.setValueAtTime(0.18, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    gain.gain.setValueAtTime(0.22, sharedAudioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, sharedAudioCtx.currentTime + 0.4);
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(sharedAudioCtx.destination);
     osc.start();
-    osc.stop(ctx.currentTime + 0.35);
+    osc.stop(sharedAudioCtx.currentTime + 0.4);
   } catch (e) {}
 }

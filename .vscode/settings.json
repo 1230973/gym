@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "*.puml": "aspnetcorerazor",
+        "plyconfig.json": "jsonc"
+    }
+}
